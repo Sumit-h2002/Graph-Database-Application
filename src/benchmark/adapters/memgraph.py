@@ -23,29 +23,41 @@ class MemgraphAdapter(GraphDatabaseAdapter):
 
     def __init__(self, metadata: DatabaseMetadata):
         super().__init__("memgraph", metadata)
-        self.uri = os.getenv("MEMGRAPH_URI", "bolt://localhost:7687")
+        self.uri = os.getenv("MEMGRAPH_URI", "")
         self.username = os.getenv("MEMGRAPH_USERNAME", "")
         self.password = os.getenv("MEMGRAPH_PASSWORD", "")
-        self.encrypted = os.getenv("MEMGRAPH_ENCRYPTED", "false").lower() in ("true", "1", "yes")
+        
+        enc_env = os.getenv("MEMGRAPH_ENCRYPTED")
+        self.encrypted_override = enc_env.lower() in ("true", "1", "yes") if enc_env else None
         self._driver = None
 
     def connect(self) -> None:
+        if not self.uri:
+            raise ValueError("Missing required environment variable: MEMGRAPH_URI")
+
         try:
             from neo4j import GraphDatabase, basic_auth
-            auth = basic_auth(self.username, self.password) if self.password else None
+            auth = basic_auth(self.username, self.password) if (self.username and self.password) else None
+            
+            driver_kwargs: Dict[str, Any] = {
+                "max_connection_lifetime": 300,
+                "max_connection_pool_size": 50,
+                "connection_acquisition_timeout": 30.0
+            }
+            if self.encrypted_override is not None:
+                driver_kwargs["encrypted"] = self.encrypted_override
+
             self._driver = GraphDatabase.driver(
                 self.uri,
                 auth=auth,
-                encrypted=self.encrypted,
-                max_connection_lifetime=300,
-                max_connection_pool_size=50
+                **driver_kwargs
             )
             self._driver.verify_connectivity()
             self.is_connected = True
-            logger.info(f"Connected successfully to Memgraph at {self.uri}")
+            logger.info("Connected successfully to Memgraph endpoint.")
         except Exception as e:
             self.is_connected = False
-            logger.error(f"Failed to connect to Memgraph at {self.uri}: {e}")
+            logger.error(f"Failed to connect to Memgraph: {e}")
             raise
 
     def close(self) -> None:
@@ -124,7 +136,7 @@ class MemgraphAdapter(GraphDatabaseAdapter):
         MATCH (dst:Paper {id: row.target_id})
         CREATE (src)-[:CITES {weight: row.weight}]->(dst)
         """
-        with self._driver.session() as session:
+        with self._driver.session(database=self.database) as session:
             for i in range(0, len(edge_records), batch_size):
                 batch = edge_records[i : i + batch_size]
                 session.run(edge_query, {"batch": batch})

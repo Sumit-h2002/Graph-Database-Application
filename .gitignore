@@ -1,7 +1,8 @@
 # Environment and Secrets
 .env
-.env.local
+.env.*
 *.env
+!.env.example
 
 # Python
 __pycache__/
@@ -31,6 +32,10 @@ venv/
 ENV/
 env/
 
+# Logs
+*.log
+logs/
+
 # Testing and Coverage
 .pytest_cache/
 .coverage
@@ -43,13 +48,15 @@ htmlcov/
 *.swp
 *.swo
 
-# Benchmark Data and Local Output
+# Benchmark Data and Local Output (Preserve samples and .gitkeep)
 data/raw/*
 !data/raw/.gitkeep
 !data/raw/README.md
 data/processed/*.csv
 data/processed/*.parquet
 !data/processed/.gitkeep
+!data/processed/metadata.json
+data/kuzu_db/
 
 # Results
 results/raw/*

@@ -23,31 +23,45 @@ class CognDBAdapter(GraphDatabaseAdapter):
 
     def __init__(self, metadata: DatabaseMetadata):
         super().__init__("cognodb", metadata)
-        self.uri = os.getenv("COGNODB_URI", "bolt://localhost:7687")
+        self.uri = os.getenv("COGNODB_URI", "")
         self.username = os.getenv("COGNODB_USERNAME", "cognodb")
         self.password = os.getenv("COGNODB_PASSWORD", "")
         self.database = os.getenv("COGNODB_DATABASE", "neo4j")
-        self.encrypted = os.getenv("COGNODB_ENCRYPTED", "false").lower() in ("true", "1", "yes")
+        
+        # Explicit override only if specified; otherwise driver infers TLS from URI (e.g. bolt+s://)
+        enc_env = os.getenv("COGNODB_ENCRYPTED")
+        self.encrypted_override = enc_env.lower() in ("true", "1", "yes") if enc_env else None
         self._driver = None
 
     def connect(self) -> None:
+        if not self.uri:
+            raise ValueError("Missing required environment variable: COGNODB_URI")
+        if not self.password:
+            raise ValueError("Missing required environment variable: COGNODB_PASSWORD")
+
         try:
             from neo4j import GraphDatabase, basic_auth
             auth = basic_auth(self.username, self.password) if self.password else None
+            
+            driver_kwargs: Dict[str, Any] = {
+                "max_connection_lifetime": 300,
+                "max_connection_pool_size": 50,
+                "connection_acquisition_timeout": 30.0
+            }
+            if self.encrypted_override is not None:
+                driver_kwargs["encrypted"] = self.encrypted_override
+
             self._driver = GraphDatabase.driver(
                 self.uri,
                 auth=auth,
-                encrypted=self.encrypted,
-                max_connection_lifetime=300,
-                max_connection_pool_size=50,
-                connection_acquisition_timeout=30.0
+                **driver_kwargs
             )
             self._driver.verify_connectivity()
             self.is_connected = True
-            logger.info(f"Connected successfully to CognDB Cloud at {self.uri}")
+            logger.info("Connected successfully to CognDB Cloud endpoint.")
         except Exception as e:
             self.is_connected = False
-            logger.error(f"Failed to connect to CognDB Cloud at {self.uri}: {e}")
+            logger.error(f"Failed to connect to CognDB Cloud: {e}")
             raise
 
     def close(self) -> None:
@@ -71,7 +85,6 @@ class CognDBAdapter(GraphDatabaseAdapter):
     def clear_database(self) -> None:
         logger.info("Clearing CognDB graph data...")
         with self._driver.session(database=self.database) as session:
-            # Drop in batches to avoid transaction memory exhaustion
             session.run("MATCH (n) DETACH DELETE n")
         logger.info("CognDB cleared.")
 
@@ -175,5 +188,4 @@ class CognDBAdapter(GraphDatabaseAdapter):
         params = params or {}
         with self._driver.session(database=self.database) as session:
             result = session.run(query, params)
-            # Fully consume the result buffer so latency reflects full server execution
             return result.data()

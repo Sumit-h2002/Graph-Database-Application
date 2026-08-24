@@ -148,6 +148,34 @@ class BenchmarkConfig:
         dbs = self.get_database_configs()
         return dbs.get(key)
 
+    def validate_database_environment(self, db_key: str) -> List[str]:
+        """
+        Validates whether required environment variables for a specific database are present.
+        Returns a list of missing variable error messages.
+        """
+        errors = []
+        key = db_key.lower()
+        if key == "cognodb":
+            if not os.getenv("COGNODB_URI"):
+                errors.append("Missing required environment variable: COGNODB_URI")
+            if not os.getenv("COGNODB_PASSWORD"):
+                errors.append("Missing required environment variable: COGNODB_PASSWORD")
+        elif key == "neo4j":
+            if not os.getenv("NEO4J_URI"):
+                errors.append("Missing required environment variable: NEO4J_URI")
+            if not os.getenv("NEO4J_PASSWORD"):
+                errors.append("Missing required environment variable: NEO4J_PASSWORD")
+        elif key == "memgraph":
+            if not os.getenv("MEMGRAPH_URI"):
+                errors.append("Missing required environment variable: MEMGRAPH_URI")
+        elif key == "falkordb":
+            if not os.getenv("FALKORDB_URI") and not os.getenv("FALKORDB_HOST"):
+                errors.append("Missing required environment variable: FALKORDB_URI (or FALKORDB_HOST)")
+        elif key == "kuzu":
+            # Kuzu defaults to data/kuzu_db if not explicitly set
+            pass
+        return errors
+
     # Workloads
     def get_workloads_config(self) -> Dict[str, Any]:
         return self._workloads_raw.get("workloads", {})

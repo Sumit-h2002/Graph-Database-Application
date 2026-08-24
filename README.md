@@ -126,12 +126,28 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-### 2. Configure Credentials
-Copy `.env.example` to `.env`:
-```bash
-cp .env.example .env
-```
-Fill in your database endpoints and credentials in `.env` (never commit `.env`).
+### 2. Configure Environment & Credentials
+
+1. Copy `.env.example` to `.env`:
+   ```bash
+   # On Linux/macOS:
+   cp .env.example .env
+
+   # On Windows (Command Prompt):
+   copy .env.example .env
+
+   # On Windows (PowerShell):
+   Copy-Item .env.example .env
+   ```
+
+2. Add your database connection URIs and credentials to `.env`.
+
+3. **Security Rule**: NEVER commit your actual `.env` file to version control. The `.gitignore` file is strictly configured to prevent accidental credential commits.
+
+4. Run the environment validation command:
+   ```bash
+   python -m benchmark.cli validate
+   ```
 
 ---
 

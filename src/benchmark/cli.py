@@ -19,10 +19,18 @@ logger = logging.getLogger("benchmark.cli")
 
 
 def cmd_validate(config: BenchmarkConfig, args: argparse.Namespace) -> int:
-    """Validates configuration and processed dataset integrity."""
+    """Validates configuration, environment variables, and dataset integrity."""
     logger.info("Validating benchmark environment and configuration...")
     dbs = config.get_database_configs()
-    logger.info(f"Configured database adapters ({len(dbs)}): {', '.join(dbs.keys())}")
+    logger.info(f"Available database adapters ({len(dbs)}): {', '.join(dbs.keys())}")
+
+    # Check environment variable readiness for each database
+    for db_key in dbs.keys():
+        missing = config.validate_database_environment(db_key)
+        if missing:
+            logger.info(f"Database '{db_key}': Not fully configured in environment (requires credentials in .env to run).")
+        else:
+            logger.info(f"Database '{db_key}': Environment configuration READY.")
 
     nodes_path = config.processed_data_dir / "nodes.csv"
     edges_path = config.processed_data_dir / "edges.csv"
@@ -40,7 +48,7 @@ def cmd_validate(config: BenchmarkConfig, args: argparse.Namespace) -> int:
     else:
         logger.warning("Processed dataset not yet found. Run 'prepare-data' command to generate it.")
 
-    logger.info("Configuration validation SUCCESSFUL.")
+    logger.info("Environment and configuration validation check complete.")
     return 0
 
 
@@ -119,7 +127,7 @@ def cmd_benchmark(config: BenchmarkConfig, args: argparse.Namespace) -> int:
         try:
             runner.run_database_benchmark(db_key=db_key, skip_load=getattr(args, "skip_load", False))
         except Exception as e:
-            logger.error(f"Benchmark failed for database '{db_key}': {e}", exc_info=True)
+            logger.error(f"Benchmark failed for database '{db_key}': {e}")
 
     # Automatically generate reports if requested
     reporter = BenchmarkReporter(config)
@@ -177,7 +185,7 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
     # validate
-    subparsers.add_parser("validate", help="Validate config and dataset integrity")
+    subparsers.add_parser("validate", help="Validate config, environment variables, and dataset integrity")
 
     # prepare-data
     p_data = subparsers.add_parser("prepare-data", help="Download and prepare standardized dataset")

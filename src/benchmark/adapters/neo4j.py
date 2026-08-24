@@ -21,31 +21,45 @@ class Neo4jAdapter(GraphDatabaseAdapter):
 
     def __init__(self, metadata: DatabaseMetadata):
         super().__init__("neo4j", metadata)
-        self.uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        self.uri = os.getenv("NEO4J_URI", "")
         self.username = os.getenv("NEO4J_USERNAME", "neo4j")
         self.password = os.getenv("NEO4J_PASSWORD", "")
         self.database = os.getenv("NEO4J_DATABASE", "neo4j")
-        self.encrypted = os.getenv("NEO4J_ENCRYPTED", "false").lower() in ("true", "1", "yes")
+        
+        # Explicit override only if specified; otherwise driver infers TLS from URI (e.g. bolt+s://)
+        enc_env = os.getenv("NEO4J_ENCRYPTED")
+        self.encrypted_override = enc_env.lower() in ("true", "1", "yes") if enc_env else None
         self._driver = None
 
     def connect(self) -> None:
+        if not self.uri:
+            raise ValueError("Missing required environment variable: NEO4J_URI")
+        if not self.password:
+            raise ValueError("Missing required environment variable: NEO4J_PASSWORD")
+
         try:
             from neo4j import GraphDatabase, basic_auth
             auth = basic_auth(self.username, self.password) if self.password else None
+            
+            driver_kwargs: Dict[str, Any] = {
+                "max_connection_lifetime": 300,
+                "max_connection_pool_size": 50,
+                "connection_acquisition_timeout": 30.0
+            }
+            if self.encrypted_override is not None:
+                driver_kwargs["encrypted"] = self.encrypted_override
+
             self._driver = GraphDatabase.driver(
                 self.uri,
                 auth=auth,
-                encrypted=self.encrypted,
-                max_connection_lifetime=300,
-                max_connection_pool_size=50,
-                connection_acquisition_timeout=30.0
+                **driver_kwargs
             )
             self._driver.verify_connectivity()
             self.is_connected = True
-            logger.info(f"Connected successfully to Neo4j at {self.uri}")
+            logger.info("Connected successfully to Neo4j endpoint.")
         except Exception as e:
             self.is_connected = False
-            logger.error(f"Failed to connect to Neo4j at {self.uri}: {e}")
+            logger.error(f"Failed to connect to Neo4j: {e}")
             raise
 
     def close(self) -> None:
