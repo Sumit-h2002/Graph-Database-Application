@@ -1,0 +1,90 @@
+databases:
+  cognodb:
+    name: "CognDB Cloud"
+    enabled: true
+    adapter_class: "CognDBAdapter"
+    version: "Cloud v1.x (Neo4j/Bolt API compatible)"
+    deployment_type: "Managed Cloud DBaaS"
+    hosting: "cloud"
+    region: "us-east-1"
+    vcpu: 2
+    ram_gb: 4.0
+    storage_gb: 20.0
+    resource_limitations: "Free/Trial tier resource limits, connection pool cap"
+    driver: "neo4j>=5.10.0"
+    query_language: "Cypher (openCypher / Bolt v4.4+)"
+    indexing_support: "BTREE / RANGE index on Node properties"
+    import_method: "Driver UNWIND batching / transactional streaming"
+    connection_env_prefix: "COGNODB"
+
+  neo4j:
+    name: "Neo4j"
+    enabled: true
+    adapter_class: "Neo4jAdapter"
+    version: "5.19.0 (Community / AuraDB Cloud)"
+    deployment_type: "Self-hosted Docker / AuraDB Cloud"
+    hosting: "self-hosted/cloud"
+    region: "us-east-1"
+    vcpu: 2
+    ram_gb: 4.0
+    storage_gb: 20.0
+    resource_limitations: "Aura Free 200k nodes / 400k rels limit; Docker local 4GB heap limit"
+    driver: "neo4j>=5.10.0"
+    query_language: "Cypher (Cypher 5 / openCypher)"
+    indexing_support: "TEXT, RANGE, POINT, LOOKUP, FULLTEXT indexes"
+    import_method: "Driver UNWIND batching & apoc.periodic.iterate / neo4j-admin import"
+    connection_env_prefix: "NEO4J"
+
+  memgraph:
+    name: "Memgraph"
+    enabled: true
+    adapter_class: "MemgraphAdapter"
+    version: "2.15.0"
+    deployment_type: "Self-hosted Docker / Cloud"
+    hosting: "self-hosted"
+    region: "local/cloud"
+    vcpu: 2
+    ram_gb: 4.0
+    storage_gb: 20.0
+    resource_limitations: "In-memory database constrained strictly by physical RAM size"
+    driver: "neo4j>=5.10.0"
+    query_language: "openCypher"
+    indexing_support: "Label and Label-Property indexes (Skip list / in-memory index)"
+    import_method: "Driver UNWIND batching / LOAD CSV / mg_import"
+    connection_env_prefix: "MEMGRAPH"
+
+  falkordb:
+    name: "FalkorDB"
+    enabled: true
+    adapter_class: "FalkorDBAdapter"
+    version: "0.4.0"
+    deployment_type: "Self-hosted Docker / Redis Module"
+    hosting: "self-hosted"
+    region: "local/cloud"
+    vcpu: 2
+    ram_gb: 4.0
+    storage_gb: 20.0
+    resource_limitations: "Redis memory fragmentation & single-thread execution per graph"
+    driver: "falkordb>=1.0.0 (or redis>=5.0.0)"
+    query_language: "openCypher"
+    indexing_support: "Node property index via GRAPH.QUERY index creation"
+    import_method: "GRAPH.QUERY UNWIND batching / falkordb-bulk-loader"
+    connection_env_prefix: "FALKORDB"
+
+  kuzu:
+    name: "Kùzu"
+    enabled: true
+    adapter_class: "KuzuAdapter"
+    version: "0.4.1"
+    deployment_type: "Embedded Columnar Graph Database Engine"
+    hosting: "local/embedded"
+    region: "local"
+    vcpu: 2
+    ram_gb: 4.0
+    storage_gb: 20.0
+    resource_limitations: "Single-process storage lock during concurrent writers"
+    driver: "kuzu>=0.4.0"
+    query_language: "Cypher (Native OpenCypher dialect)"
+    indexing_support: "Primary Key Hash Index, Columnar Disk Indexing"
+    import_method: "Native COPY FROM CSV / In-memory Arrow buffer ingestion"
+    connection_env_prefix: "KUZU"

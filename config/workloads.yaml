@@ -1,0 +1,62 @@
+workloads:
+  loading:
+    name: "data_loading"
+    description: "Ingestion of nodes and relationships using batched driver execution"
+    batch_size: 5000
+    measure_phases: ["nodes", "relationships", "total"]
+
+  traversal_1_hop:
+    name: "traversal_1_hop"
+    description: "1-hop direct neighbor expansion from deterministic sampled seed nodes"
+    warmup_iterations: 20
+    measurement_iterations: 100
+    query_template: "MATCH (n:Paper {id: $node_id})-[r:CITES]->(m:Paper) RETURN count(m) AS neighbor_count"
+
+  traversal_2_hop:
+    name: "traversal_2_hop"
+    description: "2-hop neighbor expansion from deterministic sampled seed nodes"
+    warmup_iterations: 20
+    measurement_iterations: 100
+    query_template: "MATCH (n:Paper {id: $node_id})-[r1:CITES]->(m:Paper)-[r2:CITES]->(k:Paper) RETURN count(DISTINCT k) AS two_hop_count"
+
+  traversal_3_hop:
+    name: "traversal_3_hop"
+    description: "3-hop deep path traversal from deterministic sampled seed nodes"
+    warmup_iterations: 20
+    measurement_iterations: 100
+    query_template: "MATCH (n:Paper {id: $node_id})-[r1:CITES]->(m:Paper)-[r2:CITES]->(k:Paper)-[r3:CITES]->(p:Paper) RETURN count(DISTINCT p) AS three_hop_count"
+
+  point_lookup:
+    name: "point_lookup"
+    description: "Indexed primary key lookup by unique Paper ID"
+    warmup_iterations: 20
+    measurement_iterations: 100
+    query_template: "MATCH (n:Paper {id: $node_id}) RETURN n.id AS id, n.name AS name, n.category AS category, n.year AS year"
+
+  filtered_lookup:
+    name: "filtered_lookup"
+    description: "Property-filtered search by category with indexed property scan"
+    warmup_iterations: 20
+    measurement_iterations: 100
+    query_template: "MATCH (n:Paper) WHERE n.category = $category RETURN count(n) AS match_count"
+
+  aggregation:
+    name: "aggregation"
+    description: "Grouped relationship count and property aggregation across categories"
+    warmup_iterations: 20
+    measurement_iterations: 100
+    query_template: "MATCH (n:Paper)-[r:CITES]->(m:Paper) RETURN n.category AS category, count(r) AS citation_count ORDER BY citation_count DESC LIMIT 20"
+
+  mixed_workload:
+    name: "mixed_read_write"
+    description: "Concurrent multi-client read and write workload"
+    concurrency_levels:
+      - 10
+      - 20
+      - 40
+    read_ratio: 0.8
+    write_ratio: 0.2
+    duration_seconds: 30
+    operations_per_client_fallback: 200
+    read_query: "MATCH (n:Paper {id: $node_id})-[r:CITES]->(m:Paper) RETURN count(m) AS neighbor_count"
+    write_query: "CREATE (n:Paper {id: $new_id, name: $name, category: $category, year: $year, is_synthetic: true})"

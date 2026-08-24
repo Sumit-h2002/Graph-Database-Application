@@ -1,0 +1,26 @@
+dataset:
+  name: "cit-HepPh"
+  source_url: "https://snap.stanford.edu/data/cit-HepPh.txt.gz"
+  description: "SNAP High Energy Physics citation graph"
+  random_seed: 42
+  target_nodes: 34546
+  target_relationships: 421578
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  batch_size: 5000
+
+benchmark:
+  warmup_iterations: 20
+  measurement_iterations: 100
+  repetitions: 3
+  timeout_seconds: 120
+  random_seed: 42
+  results_dir: "results"
+
+reporting:
+  generate_charts: true
+  chart_format: "png"
+  chart_dpi: 300
+  charts_dir: "results/charts"
+  processed_dir: "results/processed"
+  raw_dir: "results/raw"

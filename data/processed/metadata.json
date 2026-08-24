@@ -1,0 +1,33 @@
+{
+  "name": "cit-HepPh-standardized",
+  "random_seed": 42,
+  "node_count": 34546,
+  "relationship_count": 421534,
+  "categories": [
+    "Astrophysics",
+    "High Energy Physics - Theory",
+    "High Energy Physics - Phenomenology",
+    "Quantum Gravity",
+    "String Theory",
+    "Nuclear Theory",
+    "General Relativity",
+    "Quantum Physics"
+  ],
+  "node_columns": [
+    "id",
+    "name",
+    "category",
+    "year",
+    "weight",
+    "original_id"
+  ],
+  "edge_columns": [
+    "source_id",
+    "target_id",
+    "rel_type",
+    "weight"
+  ],
+  "min_year": 1992,
+  "max_year": 2003,
+  "avg_out_degree": 12.202107335147339
+}

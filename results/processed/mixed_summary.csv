@@ -1,0 +1,4 @@
+database,run_id,concurrency,duration_seconds,total_operations,successful_operations,failed_operations,throughput_ops_sec,read_operations,write_operations,read_throughput_ops_sec,write_throughput_ops_sec,p50_ms,p95_ms,p99_ms,error_rate,error_breakdown,timestamp
+kuzu,run_3_1787597737,10,30.01,13927,11166,2761,464.15,11166,2761,372.13,92.02,15.6541,60.4587,89.5622,0.1982,{'RuntimeError': 2761},2026-08-24T18:56:20.473873+00:00
+kuzu,run_3_1787597737,20,30.01,13922,11053,2869,463.97,11053,2869,368.35,95.61,30.3019,127.8464,195.4165,0.2061,{'RuntimeError': 2869},2026-08-24T18:56:50.484759+00:00
+kuzu,run_3_1787597737,40,30.01,13921,11066,2855,463.86,11066,2855,368.73,95.13,51.6841,275.1531,429.0526,0.2051,{'RuntimeError': 2855},2026-08-24T18:57:20.500464+00:00

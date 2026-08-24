@@ -1,0 +1,3 @@
+database,cpu_percent,memory_used_mb,memory_total_mb,database_size_mb,is_observable,notes,timestamp
+kuzu,0.0,12954.82,16076.87,,True,Host client-side observable resource snapshot,2026-08-24T18:55:17.156860+00:00
+kuzu,57.1,13997.57,16076.87,,True,Host client-side observable resource snapshot,2026-08-24T18:57:20.552426+00:00

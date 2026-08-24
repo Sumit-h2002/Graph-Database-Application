@@ -1,0 +1,2 @@
+database,run_id,nodes_loaded,rels_loaded,total_records,node_load_time_sec,rel_load_time_sec,total_load_time_sec,nodes_per_sec,rels_per_sec,total_records_per_sec,batch_size,success,error_message,timestamp
+kuzu,run_1_1787597717,34546,421534,456080,0.1719,0.3192,0.9257,200964.39,1320676.75,492660.11,5000,True,,2026-08-24T18:55:18.098534+00:00
