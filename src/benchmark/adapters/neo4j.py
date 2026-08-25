@@ -24,12 +24,17 @@ class Neo4jAdapter(GraphDatabaseAdapter):
         self.uri = os.getenv("NEO4J_URI", "")
         self.username = os.getenv("NEO4J_USERNAME", "neo4j")
         self.password = os.getenv("NEO4J_PASSWORD", "")
-        self.database = os.getenv("NEO4J_DATABASE", "neo4j")
+        self.database = os.getenv("NEO4J_DATABASE", "")
         
         # Explicit override only if specified; otherwise driver infers TLS from URI (e.g. bolt+s://)
         enc_env = os.getenv("NEO4J_ENCRYPTED")
         self.encrypted_override = enc_env.lower() in ("true", "1", "yes") if enc_env else None
         self._driver = None
+
+    def _get_session(self):
+        if self.database and self.database.lower() not in ("", "none", "default", "neo4j"):
+            return self._driver.session(database=self.database)
+        return self._driver.session()
 
     def connect(self) -> None:
         if not self.uri:
@@ -72,7 +77,7 @@ class Neo4jAdapter(GraphDatabaseAdapter):
         if not self._driver:
             return False
         try:
-            with self._driver.session(database=self.database) as session:
+            with self._get_session() as session:
                 result = session.run("RETURN 1 AS ping")
                 record = result.single()
                 return record is not None and record["ping"] == 1
@@ -82,13 +87,13 @@ class Neo4jAdapter(GraphDatabaseAdapter):
 
     def clear_database(self) -> None:
         logger.info("Clearing Neo4j graph data...")
-        with self._driver.session(database=self.database) as session:
+        with self._get_session() as session:
             session.run("MATCH (n) DETACH DELETE n")
         logger.info("Neo4j cleared.")
 
     def create_schema(self) -> None:
         logger.info("Creating Neo4j indexes and schema constraints...")
-        with self._driver.session(database=self.database) as session:
+        with self._get_session() as session:
             try:
                 session.run("CREATE CONSTRAINT paper_id_uniq IF NOT EXISTS FOR (p:Paper) REQUIRE p.id IS UNIQUE")
             except Exception:
@@ -129,13 +134,13 @@ class Neo4jAdapter(GraphDatabaseAdapter):
             weight: row.weight
         })
         """
-        with self._driver.session(database=self.database) as session:
+        with self._get_session() as session:
             for i in range(0, len(node_records), batch_size):
                 batch = node_records[i : i + batch_size]
                 session.run(node_query, {"batch": batch})
         node_load_time = time.perf_counter() - start_nodes
 
-        # 2. Ingest Edges
+        # 2. Ingest Edges (with AuraDB 400k tier limit handling)
         start_edges = time.perf_counter()
         edge_records = edges_df.to_dict(orient="records")
         edge_query = """
@@ -144,29 +149,50 @@ class Neo4jAdapter(GraphDatabaseAdapter):
         MATCH (dst:Paper {id: row.target_id})
         CREATE (src)-[:CITES {weight: row.weight}]->(dst)
         """
-        with self._driver.session(database=self.database) as session:
+        loaded_edges_count = 0
+        quota_exceeded_notice = None
+
+        with self._get_session() as session:
             for i in range(0, len(edge_records), batch_size):
                 batch = edge_records[i : i + batch_size]
-                session.run(edge_query, {"batch": batch})
-        rel_load_time = time.perf_counter() - start_edges
+                # Pre-cap if approaching Aura Free 400k relationship limit
+                if loaded_edges_count + len(batch) > 395000 and "aura" in self.uri.lower():
+                    # Truncate batch to hit 395,000 safely without transaction abort
+                    batch = batch[: max(0, 395000 - loaded_edges_count)]
+                    if not batch:
+                        quota_exceeded_notice = "AuraDB Free 400k relationship tier ceiling reached (loaded 395,000 rels)"
+                        logger.warning(f"Neo4j AuraDB: {quota_exceeded_notice}")
+                        break
 
+                try:
+                    session.run(edge_query, {"batch": batch})
+                    loaded_edges_count += len(batch)
+                except Exception as e:
+                    if "exceeded the logical size limit of 400000" in str(e) or "TransactionHookFailed" in str(e):
+                        quota_exceeded_notice = f"AuraDB Free tier limit reached at {loaded_edges_count:,} relationships."
+                        logger.warning(f"Neo4j AuraDB: {quota_exceeded_notice}")
+                        break
+                    else:
+                        raise
+
+        rel_load_time = time.perf_counter() - start_edges
         total_load_time = time.perf_counter() - start_total
-        total_records = len(nodes_df) + len(edges_df)
+        total_records = len(nodes_df) + loaded_edges_count
 
         nodes_per_sec = len(nodes_df) / max(0.001, node_load_time)
-        rels_per_sec = len(edges_df) / max(0.001, rel_load_time)
+        rels_per_sec = loaded_edges_count / max(0.001, rel_load_time)
         total_records_per_sec = total_records / max(0.001, total_load_time)
 
         logger.info(
             f"Neo4j loading complete: {len(nodes_df)} nodes in {node_load_time:.2f}s ({nodes_per_sec:.1f} nodes/s), "
-            f"{len(edges_df)} rels in {rel_load_time:.2f}s ({rels_per_sec:.1f} rels/s)."
+            f"{loaded_edges_count} rels in {rel_load_time:.2f}s ({rels_per_sec:.1f} rels/s)."
         )
 
         return LoadResult(
             database=self.db_key,
             run_id=run_id,
             nodes_loaded=len(nodes_df),
-            rels_loaded=len(edges_df),
+            rels_loaded=loaded_edges_count,
             total_records=total_records,
             node_load_time_sec=round(node_load_time, 4),
             rel_load_time_sec=round(rel_load_time, 4),
@@ -175,7 +201,8 @@ class Neo4jAdapter(GraphDatabaseAdapter):
             rels_per_sec=round(rels_per_sec, 2),
             total_records_per_sec=round(total_records_per_sec, 2),
             batch_size=batch_size,
-            success=True
+            success=True,
+            error_message=quota_exceeded_notice
         )
 
     def execute_query(
@@ -184,6 +211,6 @@ class Neo4jAdapter(GraphDatabaseAdapter):
         params: Optional[Dict[str, Any]] = None
     ) -> Any:
         params = params or {}
-        with self._driver.session(database=self.database) as session:
+        with self._get_session() as session:
             result = session.run(query, params)
             return result.data()

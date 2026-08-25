@@ -1,0 +1,59 @@
+version: '3.8'
+
+# ==============================================================================
+# Graph Database Benchmarking - Multi-Platform Container Suite
+# Resource-constrained local deployments ensuring fair 1 vCPU / 2GB RAM parity
+# ==============================================================================
+
+services:
+  # 1. Neo4j Community (Bolt Protocol on port 7687)
+  neo4j:
+    image: neo4j:5.19-community
+    container_name: benchmark-neo4j
+    environment:
+      - NEO4J_AUTH=neo4j/testpassword
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=1024m
+      - NEO4J_dbms_memory_pagecache_size=512m
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2048M
+        reservations:
+          cpus: '1.0'
+          memory: 1024M
+
+  # 2. Memgraph In-Memory (Bolt Protocol mapped to port 7688)
+  memgraph:
+    image: memgraph/memgraph:2.15.0
+    container_name: benchmark-memgraph
+    command: ["--log-level=WARNING", "--memory-limit=2048"]
+    ports:
+      - "7688:7687"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2048M
+        reservations:
+          cpus: '1.0'
+          memory: 1024M
+
+  # 3. FalkorDB / Redis Graph (Redis Protocol on port 6379)
+  falkordb:
+    image: falkordb/falkordb:0.4.0
+    container_name: benchmark-falkordb
+    ports:
+      - "6379:6379"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
+        reservations:
+          cpus: '1.0'
+          memory: 512M

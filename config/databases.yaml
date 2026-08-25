@@ -4,87 +4,117 @@ databases:
     enabled: true
     adapter_class: "CognDBAdapter"
     version: "Cloud v1.x (Neo4j/Bolt API compatible)"
+    advertised_tier: "Free / Trial Cloud DBaaS"
     deployment_type: "Managed Cloud DBaaS"
-    hosting: "cloud"
+    hosting: "AWS Managed Cloud"
     region: "us-east-1"
-    vcpu: 2
-    ram_gb: 4.0
-    storage_gb: 20.0
-    resource_limitations: "Free/Trial tier resource limits, connection pool cap"
+    vcpu: 1
+    actual_allocated_resources: "1 Shared vCPU (Burst), 1.0 GB RAM"
+    storage_type: "Managed Cloud SSD (5 GB Limit)"
+    benchmark_client_resources: "Local Runner (Windows x86_64, 8 Cores, 16 GB RAM, ~25ms RTT)"
+    resource_limitations: "Free tier memory quota (1GB), max 50 concurrent connection pool"
     driver: "neo4j>=5.10.0"
     query_language: "Cypher (openCypher / Bolt v4.4+)"
-    indexing_support: "BTREE / RANGE index on Node properties"
+    indexing_support: "RANGE / TEXT indexes on Node properties"
     import_method: "Driver UNWIND batching / transactional streaming"
     connection_env_prefix: "COGNODB"
 
   neo4j:
-    name: "Neo4j"
+    name: "Neo4j AuraDB"
     enabled: true
     adapter_class: "Neo4jAdapter"
-    version: "5.19.0 (Community / AuraDB Cloud)"
-    deployment_type: "Self-hosted Docker / AuraDB Cloud"
-    hosting: "self-hosted/cloud"
+    version: "5.19.0 (AuraDB Free / Community)"
+    advertised_tier: "AuraDB Free Instance"
+    deployment_type: "Managed Cloud DBaaS"
+    hosting: "GCP / AWS Cloud"
     region: "us-east-1"
-    vcpu: 2
-    ram_gb: 4.0
-    storage_gb: 20.0
-    resource_limitations: "Aura Free 200k nodes / 400k rels limit; Docker local 4GB heap limit"
+    vcpu: 1
+    actual_allocated_resources: "1 Shared vCPU (0.5–1.0 Core), 1.0 GB RAM (Heap 512MB + Pagecache 512MB)"
+    storage_type: "Cloud Block Storage (Cap: 200k nodes / 400k rels)"
+    benchmark_client_resources: "Local Runner (Windows x86_64, 8 Cores, 16 GB RAM, ~28ms RTT)"
+    resource_limitations: "Aura Free hard cap (200k nodes, 400k rels), single instance, auto-pause after inactivity"
     driver: "neo4j>=5.10.0"
     query_language: "Cypher (Cypher 5 / openCypher)"
-    indexing_support: "TEXT, RANGE, POINT, LOOKUP, FULLTEXT indexes"
-    import_method: "Driver UNWIND batching & apoc.periodic.iterate / neo4j-admin import"
+    indexing_support: "RANGE, TEXT, POINT, LOOKUP, FULLTEXT indexes"
+    import_method: "Driver UNWIND batching & transactional streaming"
     connection_env_prefix: "NEO4J"
 
   memgraph:
-    name: "Memgraph"
+    name: "Memgraph Cloud"
     enabled: true
     adapter_class: "MemgraphAdapter"
     version: "2.15.0"
-    deployment_type: "Self-hosted Docker / Cloud"
-    hosting: "self-hosted"
-    region: "local/cloud"
-    vcpu: 2
-    ram_gb: 4.0
-    storage_gb: 20.0
-    resource_limitations: "In-memory database constrained strictly by physical RAM size"
+    advertised_tier: "Memgraph Cloud Community / Starter"
+    deployment_type: "Managed In-Memory Cloud DBaaS"
+    hosting: "AWS Cloud / Container Sandbox"
+    region: "us-east-1"
+    vcpu: 1
+    actual_allocated_resources: "1 Dedicated vCPU, 2.0 GB RAM"
+    storage_type: "In-Memory Graph Pool + Periodic Snapshot Disk"
+    benchmark_client_resources: "Local Runner (Windows x86_64, 8 Cores, 16 GB RAM, ~26ms RTT)"
+    resource_limitations: "Strict in-memory ceiling; queries abort if heap/graph size exceeds 2.0 GB RAM"
     driver: "neo4j>=5.10.0"
     query_language: "openCypher"
-    indexing_support: "Label and Label-Property indexes (Skip list / in-memory index)"
-    import_method: "Driver UNWIND batching / LOAD CSV / mg_import"
+    indexing_support: "In-Memory Skip list and Label-Property indexes"
+    import_method: "Driver UNWIND batching / LOAD CSV"
     connection_env_prefix: "MEMGRAPH"
 
   falkordb:
-    name: "FalkorDB"
+    name: "FalkorDB Cloud"
     enabled: true
     adapter_class: "FalkorDBAdapter"
     version: "0.4.0"
-    deployment_type: "Self-hosted Docker / Redis Module"
-    hosting: "self-hosted"
-    region: "local/cloud"
-    vcpu: 2
-    ram_gb: 4.0
-    storage_gb: 20.0
-    resource_limitations: "Redis memory fragmentation & single-thread execution per graph"
+    advertised_tier: "FalkorDB Cloud Free / Redis Graph"
+    deployment_type: "Managed Redis-Based Graph DBaaS"
+    hosting: "AWS Cloud / Redis Module Sandbox"
+    region: "us-east-1"
+    vcpu: 1
+    actual_allocated_resources: "1 vCPU Core, 1.0 GB RAM"
+    storage_type: "Redis In-Memory Key-Value / GraphBLAS Sparse Matrix"
+    benchmark_client_resources: "Local Runner (Windows x86_64, 8 Cores, 16 GB RAM, ~25ms RTT)"
+    resource_limitations: "Single-threaded execution model per graph instance; 1.0 GB memory cap"
     driver: "falkordb>=1.0.0 (or redis>=5.0.0)"
     query_language: "openCypher"
     indexing_support: "Node property index via GRAPH.QUERY index creation"
-    import_method: "GRAPH.QUERY UNWIND batching / falkordb-bulk-loader"
+    import_method: "GRAPH.QUERY UNWIND batching"
     connection_env_prefix: "FALKORDB"
+
+  neptune:
+    name: "Amazon Neptune"
+    enabled: true
+    adapter_class: "NeptuneAdapter"
+    version: "1.3.1 (openCypher engine)"
+    advertised_tier: "AWS Neptune db.t3.medium (Free Tier / Starter)"
+    deployment_type: "Managed Cloud Graph DBaaS"
+    hosting: "AWS Cloud (VPC)"
+    region: "us-east-1"
+    vcpu: 2
+    actual_allocated_resources: "2 Burstable vCPU, 4.0 GB RAM"
+    storage_type: "Auto-scaling NVMe Cloud Volume (10 GB allocated)"
+    benchmark_client_resources: "Local Runner (Windows x86_64, 8 Cores, 16 GB RAM, ~22ms RTT via AWS Direct/Proxy)"
+    resource_limitations: "T3 CPU burst credits, IAM / VPC endpoint authentication requirements"
+    driver: "neo4j>=5.10.0"
+    query_language: "openCypher (Bolt v4.4+ over TLS)"
+    indexing_support: "Automatic declarative statement indexing"
+    import_method: "Driver UNWIND batching / Neptune Bulk Loader (S3)"
+    connection_env_prefix: "NEPTUNE"
 
   kuzu:
     name: "Kùzu"
     enabled: true
     adapter_class: "KuzuAdapter"
     version: "0.4.1"
-    deployment_type: "Embedded Columnar Graph Database Engine"
-    hosting: "local/embedded"
-    region: "local"
-    vcpu: 2
-    ram_gb: 4.0
-    storage_gb: 20.0
-    resource_limitations: "Single-process storage lock during concurrent writers"
+    advertised_tier: "Embedded Columnar Engine (Reference Baseline)"
+    deployment_type: "In-Process Columnar Storage Engine"
+    hosting: "Local / In-Process"
+    region: "Local Process"
+    vcpu: 1
+    actual_allocated_resources: "1.0 GB Buffer Pool, 1 Threaded Context"
+    storage_type: "Local Columnar File Format (Disk MMap)"
+    benchmark_client_resources: "Local Host (Windows x86_64, 8 Cores, 16 GB RAM, 0ms Network Hop)"
+    resource_limitations: "In-process memory lock on writes; zero network overhead baseline"
     driver: "kuzu>=0.4.0"
     query_language: "Cypher (Native OpenCypher dialect)"
     indexing_support: "Primary Key Hash Index, Columnar Disk Indexing"
-    import_method: "Native COPY FROM CSV / In-memory Arrow buffer ingestion"
+    import_method: "Native COPY FROM CSV"
     connection_env_prefix: "KUZU"

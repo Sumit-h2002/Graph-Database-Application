@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from pathlib import Path
 
 from benchmark.config import BenchmarkConfig
@@ -28,9 +29,9 @@ def cmd_validate(config: BenchmarkConfig, args: argparse.Namespace) -> int:
     for db_key in dbs.keys():
         missing = config.validate_database_environment(db_key)
         if missing:
-            logger.info(f"Database '{db_key}': Not fully configured in environment (requires credentials in .env to run).")
+            logger.info(f"Database '{db_key}': Missing env vars in .env: {', '.join(missing)}")
         else:
-            logger.info(f"Database '{db_key}': Environment configuration READY.")
+            logger.info(f"Database '{db_key}': Environment credentials present.")
 
     nodes_path = config.processed_data_dir / "nodes.csv"
     edges_path = config.processed_data_dir / "edges.csv"
@@ -49,6 +50,57 @@ def cmd_validate(config: BenchmarkConfig, args: argparse.Namespace) -> int:
         logger.warning("Processed dataset not yet found. Run 'prepare-data' command to generate it.")
 
     logger.info("Environment and configuration validation check complete.")
+    return 0
+
+
+def cmd_check_connections(config: BenchmarkConfig, args: argparse.Namespace) -> int:
+    """Tests live network connectivity, authentication, and ping for all databases in .env."""
+    from benchmark.adapters import get_adapter
+
+    dbs = config.get_database_configs()
+    target_dbs = [args.database.lower()] if getattr(args, "database", None) else list(dbs.keys())
+
+    print("\n" + "=" * 80)
+    print("GRAPH DATABASE LIVE CONNECTION & CREDENTIAL VERIFICATION")
+    print("=" * 80)
+
+    results = []
+    for db_key in target_dbs:
+        db_meta = dbs.get(db_key)
+        if not db_meta:
+            print(f"[-] Unknown database: {db_key}")
+            continue
+
+        missing = config.validate_database_environment(db_key)
+        if missing:
+            print(f"[-] {db_meta.name:<18} : [MISSING CREDENTIALS] {', '.join(missing)}")
+            results.append((db_meta.name, "MISSING_CONFIG", "-"))
+            continue
+
+        adapter = get_adapter(db_key, db_meta)
+        start = time.perf_counter()
+        try:
+            adapter.connect()
+            is_healthy = adapter.health_check()
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            if is_healthy:
+                print(f"[+] {db_meta.name:<18} : [CONNECTED & AUTHENTICATED] (Ping: {elapsed_ms:.1f}ms)")
+                results.append((db_meta.name, "SUCCESS", f"{elapsed_ms:.1f}ms"))
+            else:
+                print(f"[!] {db_meta.name:<18} : [CONNECTED BUT PING FAILED] (Time: {elapsed_ms:.1f}ms)")
+                results.append((db_meta.name, "PING_FAILED", f"{elapsed_ms:.1f}ms"))
+        except Exception as e:
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            err_msg = str(e).split("\n")[0]
+            print(f"[X] {db_meta.name:<18} : [CONNECTION / AUTH FAILED] {err_msg[:65]}")
+            results.append((db_meta.name, "FAILED", f"Error: {err_msg[:30]}"))
+        finally:
+            try:
+                adapter.close()
+            except Exception:
+                pass
+
+    print("=" * 80 + "\n")
     return 0
 
 
@@ -180,12 +232,16 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         prog="python -m benchmark.cli",
-        description="Graph Database Cloud Benchmarking Suite (CognDB, Neo4j, Memgraph, FalkorDB, Kùzu)"
+        description="Graph Database Cloud Benchmarking Suite (CognDB, Neo4j, Memgraph, FalkorDB, Neptune, Kùzu)"
     )
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
     # validate
     subparsers.add_parser("validate", help="Validate config, environment variables, and dataset integrity")
+
+    # check-connections
+    p_check = subparsers.add_parser("check-connections", help="Test live network connectivity and authentication for databases in .env")
+    p_check.add_argument("--database", help="Optional specific database key to verify (e.g. cognodb, neo4j)")
 
     # prepare-data
     p_data = subparsers.add_parser("prepare-data", help="Download and prepare standardized dataset")
@@ -215,6 +271,7 @@ def main() -> None:
 
     dispatch = {
         "validate": cmd_validate,
+        "check-connections": cmd_check_connections,
         "prepare-data": cmd_prepare_data,
         "load": cmd_load,
         "benchmark": cmd_benchmark,
