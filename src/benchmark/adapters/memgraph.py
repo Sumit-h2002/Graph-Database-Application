@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
+from urllib.parse import urlparse
 from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
@@ -23,13 +25,32 @@ class MemgraphAdapter(GraphDatabaseAdapter):
 
     def __init__(self, metadata: DatabaseMetadata):
         super().__init__("memgraph", metadata)
-        self.uri = os.getenv("MEMGRAPH_URI", "")
-        self.username = os.getenv("MEMGRAPH_USERNAME", "")
-        self.password = os.getenv("MEMGRAPH_PASSWORD", "")
+        raw_uri = os.getenv("MEMGRAPH_URI", "").strip()
+        self.username = os.getenv("MEMGRAPH_USERNAME", "").strip()
+        self.password = os.getenv("MEMGRAPH_PASSWORD", "").strip()
+
+        # Sanitize URI if user passed username/path inside the URI string
+        self.uri = self._sanitize_bolt_uri(raw_uri)
         
         enc_env = os.getenv("MEMGRAPH_ENCRYPTED")
         self.encrypted_override = enc_env.lower() in ("true", "1", "yes") if enc_env else None
         self._driver = None
+
+    def _sanitize_bolt_uri(self, uri: str) -> str:
+        if not uri:
+            return ""
+        # Handle cases like bolt+ssc://user:pass@host:port/path or bolt://host:port
+        try:
+            parsed = urlparse(uri)
+            if parsed.scheme and parsed.netloc:
+                host_port = parsed.netloc.split("@")[-1]
+                return f"{parsed.scheme}://{host_port}"
+        except Exception:
+            pass
+        # Fallback regex
+        clean = re.sub(r'(bolt[^\:]*:\/\/)([^@]+@)', r'\1', uri)
+        clean = clean.split("/")[0] if "://" not in clean else "/".join(clean.split("/")[:3])
+        return clean
 
     def connect(self) -> None:
         if not self.uri:
@@ -136,7 +157,7 @@ class MemgraphAdapter(GraphDatabaseAdapter):
         MATCH (dst:Paper {id: row.target_id})
         CREATE (src)-[:CITES {weight: row.weight}]->(dst)
         """
-        with self._driver.session(database=self.database) as session:
+        with self._driver.session() as session:
             for i in range(0, len(edge_records), batch_size):
                 batch = edge_records[i : i + batch_size]
                 session.run(edge_query, {"batch": batch})
