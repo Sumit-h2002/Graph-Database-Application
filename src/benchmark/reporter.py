@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -58,7 +58,7 @@ class BenchmarkReporter:
         # Group by database taking mean across runs
         agg = df.groupby("database")[["nodes_per_sec", "rels_per_sec"]].mean().reset_index()
 
-        fig, ax = plt.subplots(figsize=(9, 5), dpi=self.config.charts_dir.parent.joinpath("config").exists() and 300 or 150)
+        fig, ax = plt.subplots(figsize=(9, 5), dpi=150)
         x = np.arange(len(agg))
         width = 0.35
 
@@ -267,20 +267,48 @@ class BenchmarkReporter:
         plt.close(fig)
 
     def generate_markdown_report(self) -> Path:
-        """Generates comprehensive markdown report summarizing all benchmark results."""
+        """Generates comprehensive markdown report summarizing all benchmark results and database matrix."""
         report_path = self.processed_dir / "benchmark_report.md"
 
         sections = []
         sections.append("# Graph Database Cloud Benchmarking Report\n")
         sections.append(f"**Generated**: {pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M:%S UTC')}\n")
-        sections.append("This report presents empirical performance metrics comparing CognDB Cloud, Neo4j, Memgraph, FalkorDB, and Kùzu.\n")
+        sections.append("This report presents empirical performance metrics evaluating **CognDB Cloud** alongside **Neo4j**, **Memgraph**, **FalkorDB**, and **Kùzu** under identical workloads and standardized datasets.\n")
+
+        # 0. Database Platform Matrix & Execution Status
+        sections.append("## 1. Database Platform Matrix & Status\n")
+        db_configs = self.config.get_database_configs()
+        
+        # Check which databases have measured data
+        measured_dbs = set()
+        agg_csv = self.processed_dir / "aggregated_summary.csv"
+        if agg_csv.exists():
+            df_agg_check = pd.read_csv(agg_csv)
+            if not df_agg_check.empty and "database" in df_agg_check.columns:
+                measured_dbs = set(df_agg_check["database"].unique())
+
+        matrix_records = []
+        for key, meta in db_configs.items():
+            status = "Measured (Live Benchmark)" if key in measured_dbs else "Not yet measured (Requires credentials in .env)"
+            matrix_records.append({
+                "Database": meta.name,
+                "Key": key,
+                "Deployment Type": meta.deployment_type,
+                "Hosting": meta.hosting,
+                "vCPU / RAM": f"{meta.vcpu} vCPU / {meta.ram_gb} GB",
+                "Query Language": meta.query_language,
+                "Status": status
+            })
+
+        sections.append(tabulate(matrix_records, headers="keys", tablefmt="github"))
+        sections.append("\n")
 
         # 1. Loading Summary
+        sections.append("## 2. Data Ingestion Performance\n")
         load_csv = self.processed_dir / "load_summary.csv"
         if load_csv.exists():
             df_load = pd.read_csv(load_csv)
             if not df_load.empty:
-                sections.append("## 1. Data Ingestion Performance\n")
                 summary_load = df_load.groupby("database").agg({
                     "nodes_loaded": "max",
                     "rels_loaded": "max",
@@ -289,15 +317,43 @@ class BenchmarkReporter:
                     "rels_per_sec": "mean",
                     "total_records_per_sec": "mean"
                 }).reset_index()
-                sections.append(tabulate(summary_load, headers="keys", tablefmt="github", floatfmt=".2f"))
+                
+                load_table_records = []
+                for _, row in summary_load.iterrows():
+                    load_table_records.append({
+                        "Database": str(row["database"]).upper(),
+                        "Nodes Ingested": f"{int(row['nodes_loaded']):,}",
+                        "Edges Ingested": f"{int(row['rels_loaded']):,}",
+                        "Total Time (s)": f"{float(row['total_load_time_sec']):.2f}",
+                        "Nodes / sec": f"{float(row['nodes_per_sec']):,.1f}",
+                        "Rels / sec": f"{float(row['rels_per_sec']):,.1f}",
+                        "Total Ingestion Rate (records/sec)": f"{float(row['total_records_per_sec']):,.1f}"
+                    })
+
+                # Add unmeasured databases explicitly (Rule 27 compliance)
+                for key, meta in db_configs.items():
+                    if key not in summary_load["database"].values:
+                        load_table_records.append({
+                            "Database": meta.name,
+                            "Nodes Ingested": "-",
+                            "Edges Ingested": "-",
+                            "Total Time (s)": "Not yet measured",
+                            "Nodes / sec": "-",
+                            "Rels / sec": "-",
+                            "Total Ingestion Rate (records/sec)": "-"
+                        })
+                sections.append(tabulate(load_table_records, headers="keys", tablefmt="github"))
                 sections.append("\n")
+            else:
+                sections.append("*No data loading runs recorded yet.*\n")
+        else:
+            sections.append("*No data loading summary file found.*\n")
 
         # 2. Workload Latencies
-        agg_csv = self.processed_dir / "aggregated_summary.csv"
+        sections.append("## 3. Workload Latency Metrics (p50, p90, p95, p99, Throughput)\n")
         if agg_csv.exists():
             df_agg = pd.read_csv(agg_csv)
             if not df_agg.empty:
-                sections.append("## 2. Workload Latency Metrics (p50, p90, p95, p99, Throughput)\n")
                 summary_agg = df_agg.groupby(["database", "workload"]).agg({
                     "successful_operations": "sum",
                     "failed_operations": "sum",
@@ -307,15 +363,48 @@ class BenchmarkReporter:
                     "mean_ms": "mean",
                     "throughput_ops_sec": "mean"
                 }).reset_index()
-                sections.append(tabulate(summary_agg, headers="keys", tablefmt="github", floatfmt=".3f"))
+                
+                agg_table_records = []
+                for _, row in summary_agg.iterrows():
+                    agg_table_records.append({
+                        "Database": str(row["database"]).upper(),
+                        "Workload": str(row["workload"]),
+                        "Success Ops": int(row["successful_operations"]),
+                        "Failed Ops": int(row["failed_operations"]),
+                        "p50 (ms)": f"{float(row['p50_ms']):.2f}",
+                        "p95 (ms)": f"{float(row['p95_ms']):.2f}",
+                        "p99 (ms)": f"{float(row['p99_ms']):.2f}",
+                        "Mean (ms)": f"{float(row['mean_ms']):.2f}",
+                        "Throughput (ops/s)": f"{float(row['throughput_ops_sec']):.1f}"
+                    })
+
+                # Add unmeasured databases explicitly
+                for key, meta in db_configs.items():
+                    if key not in summary_agg["database"].values:
+                        agg_table_records.append({
+                            "Database": meta.name,
+                            "Workload": "All Workloads (1/2/3-hop, lookups, aggs)",
+                            "Success Ops": "-",
+                            "Failed Ops": "-",
+                            "p50 (ms)": "Not yet measured",
+                            "p95 (ms)": "-",
+                            "p99 (ms)": "-",
+                            "Mean (ms)": "-",
+                            "Throughput (ops/s)": "-"
+                        })
+                sections.append(tabulate(agg_table_records, headers="keys", tablefmt="github"))
                 sections.append("\n")
+            else:
+                sections.append("*No workload execution records found.*\n")
+        else:
+            sections.append("*No workload summary file found.*\n")
 
         # 3. Mixed Concurrency
+        sections.append("## 4. Concurrent Multi-Client Mixed Read/Write Scaling\n")
         mixed_csv = self.processed_dir / "mixed_summary.csv"
         if mixed_csv.exists():
             df_mixed = pd.read_csv(mixed_csv)
             if not df_mixed.empty:
-                sections.append("## 3. Concurrent Multi-Client Mixed Read/Write Scaling\n")
                 summary_mixed = df_mixed.groupby(["database", "concurrency"]).agg({
                     "total_operations": "sum",
                     "successful_operations": "sum",
@@ -327,8 +416,44 @@ class BenchmarkReporter:
                     "p95_ms": "mean",
                     "error_rate": "mean"
                 }).reset_index()
-                sections.append(tabulate(summary_mixed, headers="keys", tablefmt="github", floatfmt=".2f"))
+
+                mixed_table_records = []
+                for _, row in summary_mixed.iterrows():
+                    mixed_table_records.append({
+                        "Database": str(row["database"]).upper(),
+                        "Concurrency": f"{int(row['concurrency'])} workers",
+                        "Total Ops": f"{int(row['total_operations']):,}",
+                        "Success Ops": f"{int(row['successful_operations']):,}",
+                        "Failed Ops": f"{int(row['failed_operations']):,}",
+                        "Total Throughput (ops/s)": f"{float(row['throughput_ops_sec']):.1f}",
+                        "Read Ops/s": f"{float(row['read_throughput_ops_sec']):.1f}",
+                        "Write Ops/s": f"{float(row['write_throughput_ops_sec']):.1f}",
+                        "p50 (ms)": f"{float(row['p50_ms']):.2f}",
+                        "p95 (ms)": f"{float(row['p95_ms']):.2f}",
+                        "Error Rate": f"{float(row['error_rate']):.1%}"
+                    })
+
+                for key, meta in db_configs.items():
+                    if key not in summary_mixed["database"].values:
+                        mixed_table_records.append({
+                            "Database": meta.name,
+                            "Concurrency": "10 / 20 / 40 workers",
+                            "Total Ops": "-",
+                            "Success Ops": "-",
+                            "Failed Ops": "-",
+                            "Total Throughput (ops/s)": "Not yet measured",
+                            "Read Ops/s": "-",
+                            "Write Ops/s": "-",
+                            "p50 (ms)": "-",
+                            "p95 (ms)": "-",
+                            "Error Rate": "-"
+                        })
+                sections.append(tabulate(mixed_table_records, headers="keys", tablefmt="github"))
                 sections.append("\n")
+            else:
+                sections.append("*No concurrent workload records found.*\n")
+        else:
+            sections.append("*No mixed summary file found.*\n")
 
         content = "\n".join(sections)
         with open(report_path, "w", encoding="utf-8") as f:
