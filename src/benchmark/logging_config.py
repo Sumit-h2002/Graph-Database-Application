@@ -12,22 +12,21 @@ from typing import Optional
 class SensitiveFilter(logging.Filter):
     """Filter that masks sensitive substrings such as passwords and tokens."""
 
-    SENSITIVE_PATTERNS = [
-        re.compile(r'(password[:=]\s*)([^\s,;&]+)', re.IGNORECASE),
-        re.compile(r'(auth[:=]\s*)([^\s,;&]+)', re.IGNORECASE),
-        re.compile(r'(token[:=]\s*)([^\s,;&]+)', re.IGNORECASE),
-        re.compile(r'(bolt://[^:]+:)([^@]+)(@)', re.IGNORECASE),
-        re.compile(r'(redis://[^:]+:)([^@]+)(@)', re.IGNORECASE),
+    SENSITIVE_RULES = [
+        (re.compile(r'(password[:=]\s*)([^\s,;&]+)', re.IGNORECASE), r'\1***'),
+        (re.compile(r'(auth[:=]\s*)([^\s,;&]+)', re.IGNORECASE), r'\1***'),
+        (re.compile(r'(token[:=]\s*)([^\s,;&]+)', re.IGNORECASE), r'\1***'),
+        (re.compile(r'((?:bolt|redis|rediss)[^\:]*://[^:]+:)([^@]+)(@)', re.IGNORECASE), r'\1***\3'),
     ]
 
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.msg, str):
             msg = record.msg
-            for pattern in self.SENSITIVE_PATTERNS:
-                if "bolt://" in msg or "redis://" in msg:
-                    msg = pattern.sub(r'\1***\3', msg)
-                else:
-                    msg = pattern.sub(r'\1***', msg)
+            for pattern, repl in self.SENSITIVE_RULES:
+                try:
+                    msg = pattern.sub(repl, msg)
+                except Exception:
+                    pass
             record.msg = msg
         return True
 

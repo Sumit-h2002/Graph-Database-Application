@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from urllib.parse import urlparse
 from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
@@ -23,51 +24,57 @@ class FalkorDBAdapter(GraphDatabaseAdapter):
 
     def __init__(self, metadata: DatabaseMetadata):
         super().__init__("falkordb", metadata)
-        self.uri = os.getenv("FALKORDB_URI", "")
-        self.host = os.getenv("FALKORDB_HOST", "")
+        raw_uri = os.getenv("FALKORDB_URI", "").strip()
+        self.username = os.getenv("FALKORDB_USERNAME", "").strip()
+        self.password = os.getenv("FALKORDB_PASSWORD", "").strip() or None
+        self.graph_name = os.getenv("FALKORDB_GRAPH_NAME", "benchmark_graph").strip()
+
+        # Parse host and port
+        self.host = os.getenv("FALKORDB_HOST", "").strip()
         self.port = int(os.getenv("FALKORDB_PORT", "6379")) if os.getenv("FALKORDB_PORT") else 6379
-        self.username = os.getenv("FALKORDB_USERNAME", "")
-        self.password = os.getenv("FALKORDB_PASSWORD", "") or None
-        self.graph_name = os.getenv("FALKORDB_GRAPH_NAME", "benchmark_graph")
+        self.ssl = os.getenv("FALKORDB_SSL", "").lower() in ("true", "1", "yes")
+
+        if raw_uri:
+            if "://" in raw_uri:
+                parsed = urlparse(raw_uri)
+                self.host = parsed.hostname or ""
+                self.port = parsed.port or 6379
+                if parsed.username:
+                    self.username = parsed.username
+                if parsed.password:
+                    self.password = parsed.password
+                if parsed.scheme in ("rediss", "falkors"):
+                    self.ssl = True
+            elif ":" in raw_uri:
+                parts = raw_uri.split(":")
+                self.host = parts[0]
+                self.port = int(parts[1])
+            else:
+                self.host = raw_uri
+
         self._client = None
         self._graph = None
 
     def connect(self) -> None:
-        if not self.uri and not self.host:
+        if not self.host:
             raise ValueError("Missing required environment variable: FALKORDB_URI (or FALKORDB_HOST)")
 
         try:
-            try:
-                from falkordb import FalkorDB
-                if self.uri:
-                    self._client = FalkorDB.from_url(self.uri)
-                else:
-                    self._client = FalkorDB(
-                        host=self.host,
-                        port=self.port,
-                        username=self.username or None,
-                        password=self.password
-                    )
-                self._graph = self._client.select_graph(self.graph_name)
-            except (ImportError, AttributeError):
-                import redis
-                if self.uri:
-                    r = redis.from_url(self.uri, decode_responses=True)
-                else:
-                    r = redis.Redis(
-                        host=self.host,
-                        port=self.port,
-                        username=self.username or None,
-                        password=self.password,
-                        decode_responses=True
-                    )
-                self._client = r
-                self._graph = r.graph(self.graph_name)
-
-            # Test connection
+            from falkordb import FalkorDB
+            self._client = FalkorDB(
+                host=self.host,
+                port=self.port,
+                username=self.username or None,
+                password=self.password,
+                ssl=self.ssl,
+                socket_timeout=15.0,
+                socket_connect_timeout=15.0
+            )
+            self._graph = self._client.select_graph(self.graph_name)
             self._graph.query("RETURN 1 AS ping")
+
             self.is_connected = True
-            logger.info("Connected successfully to FalkorDB endpoint.")
+            logger.info(f"Connected successfully to FalkorDB at {self.host}:{self.port} (graph='{self.graph_name}')")
         except Exception as e:
             self.is_connected = False
             logger.error(f"Failed to connect to FalkorDB: {e}")
@@ -96,11 +103,14 @@ class FalkorDBAdapter(GraphDatabaseAdapter):
     def clear_database(self) -> None:
         logger.info(f"Clearing FalkorDB graph '{self.graph_name}'...")
         try:
-            self._graph.delete()
+            if hasattr(self._graph, "delete"):
+                self._graph.delete()
+            else:
+                self.execute_query("MATCH (n) DETACH DELETE n")
         except Exception as e:
             logger.warning(f"FalkorDB graph delete notice: {e}. Executing MATCH (n) DETACH DELETE n...")
             try:
-                self._graph.query("MATCH (n) DETACH DELETE n")
+                self.execute_query("MATCH (n) DETACH DELETE n")
             except Exception:
                 pass
         logger.info("FalkorDB cleared.")

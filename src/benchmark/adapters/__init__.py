@@ -9,7 +9,6 @@ from benchmark.adapters.neo4j import Neo4jAdapter
 from benchmark.adapters.memgraph import MemgraphAdapter
 from benchmark.adapters.falkordb import FalkorDBAdapter
 from benchmark.adapters.kuzu import KuzuAdapter
-from benchmark.adapters.neptune import NeptuneAdapter
 from benchmark.adapters.mock import MockDatabaseAdapter
 from benchmark.models import DatabaseMetadata
 
@@ -18,7 +17,6 @@ ADAPTER_REGISTRY: Dict[str, Type[GraphDatabaseAdapter]] = {
     "neo4j": Neo4jAdapter,
     "memgraph": MemgraphAdapter,
     "falkordb": FalkorDBAdapter,
-    "neptune": NeptuneAdapter,
     "kuzu": KuzuAdapter,
     "mock": MockDatabaseAdapter,
 }
@@ -38,7 +36,6 @@ __all__ = [
     "Neo4jAdapter",
     "MemgraphAdapter",
     "FalkorDBAdapter",
-    "NeptuneAdapter",
     "KuzuAdapter",
     "MockDatabaseAdapter",
     "get_adapter",
