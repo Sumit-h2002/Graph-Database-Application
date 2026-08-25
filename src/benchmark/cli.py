@@ -1,17 +1,17 @@
 """
-Command-line interface (CLI) for Graph Database Cloud Benchmarking.
+Command Line Interface (CLI) for Graph Database Benchmarking Suite.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
-import time
-from pathlib import Path
+from typing import List
 
 from benchmark.config import BenchmarkConfig
-from benchmark.dataset import DatasetGenerator, DatasetLoader, DatasetValidator
+from benchmark.dataset import DatasetDownloader, GraphGenerator, DatasetValidator
 from benchmark.logging_config import setup_logging
 from benchmark.reporter import BenchmarkReporter
 from benchmark.runner import BenchmarkRunner
@@ -20,103 +20,116 @@ logger = logging.getLogger("benchmark.cli")
 
 
 def cmd_validate(config: BenchmarkConfig, args: argparse.Namespace) -> int:
-    """Validates configuration, environment variables, and dataset integrity."""
-    logger.info("Validating benchmark environment and configuration...")
-    dbs = config.get_database_configs()
-    logger.info(f"Available database adapters ({len(dbs)}): {', '.join(dbs.keys())}")
+    """Validates configuration files, dataset files, and environment settings."""
+    logger.info("Starting comprehensive benchmark pre-flight validation...")
+    errors: List[str] = []
 
-    # Check environment variable readiness for each database
-    for db_key in dbs.keys():
-        missing = config.validate_database_environment(db_key)
-        if missing:
-            logger.info(f"Database '{db_key}': Missing env vars in .env: {', '.join(missing)}")
-        else:
-            logger.info(f"Database '{db_key}': Environment credentials present.")
+    # 1. Check configs
+    if not (config.config_dir / "benchmark.yaml").exists():
+        errors.append("Missing benchmark.yaml")
+    if not (config.config_dir / "databases.yaml").exists():
+        errors.append("Missing databases.yaml")
+    if not (config.config_dir / "workloads.yaml").exists():
+        errors.append("Missing workloads.yaml")
 
-    nodes_path = config.processed_data_dir / "nodes.csv"
-    edges_path = config.processed_data_dir / "edges.csv"
+    # 2. Check dataset
+    nodes_file = config.processed_dataset_dir / "nodes.csv"
+    edges_file = config.processed_dataset_dir / "edges.csv"
 
-    if nodes_path.exists() and edges_path.exists():
-        import pandas as pd
-        nodes_df = pd.read_csv(nodes_path)
-        edges_df = pd.read_csv(edges_path)
-        validator = DatasetValidator(min_relationships=100000, max_relationships=500000)
+    if not nodes_file.exists() or not edges_file.exists():
+        logger.warning("Processed dataset files not found. Auto-generating standardized dataset...")
+        gen = GraphGenerator(
+            output_dir=config.processed_dataset_dir,
+            random_seed=config.benchmark_raw.get("dataset", {}).get("random_seed", 42)
+        )
+        gen.process_and_save()
+
+    # 3. Validate dataset integrity
+    import pandas as pd
+    try:
+        nodes_df = pd.read_csv(nodes_file)
+        edges_df = pd.read_csv(edges_file)
+        validator = DatasetValidator(
+            min_relationships=config.benchmark_raw.get("dataset", {}).get("min_relationships", 100000),
+            max_relationships=config.benchmark_raw.get("dataset", {}).get("max_relationships", 500000)
+        )
         report = validator.validate(nodes_df, edges_df, strict_range=False)
         if not report.is_valid:
-            logger.error(f"Dataset validation failed: {report.errors}")
-            return 1
-        logger.info(f"Dataset integrity check PASSED ({report.node_count:,} nodes, {report.relationship_count:,} edges).")
-    else:
-        logger.warning("Processed dataset not yet found. Run 'prepare-data' command to generate it.")
+            errors.extend(report.errors)
+        else:
+            logger.info(f"Dataset validation passed ({report.node_count:,} nodes, {report.edge_count:,} edges).")
+    except Exception as e:
+        errors.append(f"Failed to read/validate dataset: {e}")
 
-    logger.info("Environment and configuration validation check complete.")
+    if errors:
+        for err in errors:
+            logger.error(f"[VALIDATION FAILED] {err}")
+        return 1
+
+    logger.info("[VALIDATION PASSED] All pre-flight checks succeeded.")
     return 0
 
 
 def cmd_check_connections(config: BenchmarkConfig, args: argparse.Namespace) -> int:
-    """Tests live network connectivity, authentication, and ping for all databases in .env."""
+    """Verifies live network connectivity and authentication for configured databases."""
+    import time
     from benchmark.adapters import get_adapter
 
+    target_db = getattr(args, "database", None)
     dbs = config.get_database_configs()
-    target_dbs = [args.database.lower()] if getattr(args, "database", None) else list(dbs.keys())
+    if target_db:
+        target_db = target_db.lower()
+        if target_db not in dbs:
+            logger.error(f"Unknown database key: '{target_db}'. Available: {list(dbs.keys())}")
+            return 1
+        dbs = {target_db: dbs[target_db]}
 
     print("\n" + "=" * 80)
     print("GRAPH DATABASE LIVE CONNECTION & CREDENTIAL VERIFICATION")
     print("=" * 80)
 
-    results = []
-    for db_key in target_dbs:
-        db_meta = dbs.get(db_key)
-        if not db_meta:
-            print(f"[-] Unknown database: {db_key}")
+    all_passed = True
+    for db_key, meta in dbs.items():
+        if db_key == "mock":
             continue
-
-        missing = config.validate_database_environment(db_key)
-        if missing:
-            print(f"[-] {db_meta.name:<18} : [MISSING CREDENTIALS] {', '.join(missing)}")
-            results.append((db_meta.name, "MISSING_CONFIG", "-"))
-            continue
-
-        adapter = get_adapter(db_key, db_meta)
-        start = time.perf_counter()
         try:
+            adapter = get_adapter(db_key, meta)
+            start_ping = time.perf_counter()
             adapter.connect()
-            is_healthy = adapter.health_check()
-            elapsed_ms = (time.perf_counter() - start) * 1000.0
-            if is_healthy:
-                print(f"[+] {db_meta.name:<18} : [CONNECTED & AUTHENTICATED] (Ping: {elapsed_ms:.1f}ms)")
-                results.append((db_meta.name, "SUCCESS", f"{elapsed_ms:.1f}ms"))
+            ping_ok = adapter.health_check()
+            ping_ms = (time.perf_counter() - start_ping) * 1000
+            adapter.close()
+
+            if ping_ok:
+                print(f"[+] {meta.name:<20}: [CONNECTED & AUTHENTICATED] (Ping: {ping_ms:.1f}ms)")
             else:
-                print(f"[!] {db_meta.name:<18} : [CONNECTED BUT PING FAILED] (Time: {elapsed_ms:.1f}ms)")
-                results.append((db_meta.name, "PING_FAILED", f"{elapsed_ms:.1f}ms"))
+                print(f"[-] {meta.name:<20}: [PING FAILED - UNRESPONSIVE]")
+                all_passed = False
+        except ValueError as ve:
+            print(f"[-] {meta.name:<20}: [MISSING CREDENTIALS] {ve}")
+            all_passed = False
         except Exception as e:
-            elapsed_ms = (time.perf_counter() - start) * 1000.0
-            err_msg = str(e).split("\n")[0]
-            print(f"[X] {db_meta.name:<18} : [CONNECTION / AUTH FAILED] {err_msg[:65]}")
-            results.append((db_meta.name, "FAILED", f"Error: {err_msg[:30]}"))
-        finally:
-            try:
-                adapter.close()
-            except Exception:
-                pass
+            print(f"[X] {meta.name:<20}: [CONNECTION / AUTH FAILED] {e}")
+            all_passed = False
 
     print("=" * 80 + "\n")
-    return 0
+    return 0 if all_passed else 1
 
 
 def cmd_prepare_data(config: BenchmarkConfig, args: argparse.Namespace) -> int:
-    """Downloads raw SNAP citation graph or creates deterministic dataset."""
-    logger.info(f"Preparing dataset with random seed {config.random_seed}...")
-    loader = DatasetLoader(raw_dir=config.raw_data_dir, source_url=config.dataset_source_url)
-    generator = DatasetGenerator(
-        processed_dir=config.processed_data_dir,
-        random_seed=config.random_seed,
-        target_nodes=config.target_nodes,
-        target_relationships=config.target_relationships
+    """Downloads or generates the standardized graph dataset."""
+    logger.info("Preparing standardized benchmark dataset...")
+    generator = GraphGenerator(
+        output_dir=config.processed_dataset_dir,
+        random_seed=config.benchmark_raw.get("dataset", {}).get("random_seed", 42)
     )
 
-    raw_edges = []
+    raw_edges = None
     if not getattr(args, "synthetic_only", False):
+        loader = DatasetDownloader(
+            data_dir=config.raw_dataset_dir,
+            dataset_name=config.benchmark_raw.get("dataset", {}).get("name", "cit-HepPh")
+        )
         try:
             raw_edges = loader.load_raw_edges()
         except Exception as e:
@@ -138,28 +151,38 @@ def cmd_prepare_data(config: BenchmarkConfig, args: argparse.Namespace) -> int:
 def cmd_load(config: BenchmarkConfig, args: argparse.Namespace) -> int:
     """Loads dataset into a specified database."""
     runner = BenchmarkRunner(config)
-    db_key = args.database.lower()
+    db_arg = getattr(args, "database", None)
+    if not db_arg or db_arg.lower() == "all":
+        dbs = config.get_database_configs()
+        target_dbs = [k for k, v in dbs.items() if v.enabled]
+    else:
+        target_dbs = [db_arg.lower()]
+
     nodes_df, edges_df, _ = runner.load_dataset()
-
     from benchmark.adapters import get_adapter
-    db_meta = config.get_database_config(db_key)
-    if not db_meta:
-        logger.error(f"Unknown database: {db_key}")
-        return 1
 
-    adapter = get_adapter(db_key, db_meta)
-    try:
-        adapter.connect()
-        adapter.clear_database()
-        adapter.create_schema()
-        from benchmark.workloads.loading import LoadingWorkload
-        loader = LoadingWorkload(batch_size=config.default_batch_size)
-        res = loader.run(adapter, nodes_df, edges_df, run_id="manual_load")
-        runner.result_store.save_load_results([res])
-        logger.info(f"Loaded {db_key}: {res.nodes_loaded} nodes, {res.rels_loaded} edges in {res.total_load_time_sec:.2f}s")
-        return 0
-    finally:
-        adapter.close()
+    for db_key in target_dbs:
+        db_meta = config.get_database_config(db_key)
+        if not db_meta:
+            logger.error(f"Unknown database: {db_key}")
+            continue
+
+        adapter = get_adapter(db_key, db_meta)
+        try:
+            adapter.connect()
+            adapter.clear_database()
+            adapter.create_schema()
+            from benchmark.workloads.loading import LoadingWorkload
+            loader = LoadingWorkload(batch_size=config.default_batch_size)
+            res = loader.run(adapter, nodes_df, edges_df, run_id="manual_load")
+            runner.result_store.save_load_results([res])
+            logger.info(f"Loaded {db_key}: {res.nodes_loaded:,} nodes, {res.rels_loaded:,} edges in {res.total_load_time_sec:.2f}s")
+        except Exception as e:
+            logger.error(f"Failed to load data into '{db_key}': {e}")
+        finally:
+            adapter.close()
+
+    return 0
 
 
 def cmd_benchmark(config: BenchmarkConfig, args: argparse.Namespace) -> int:
@@ -167,11 +190,12 @@ def cmd_benchmark(config: BenchmarkConfig, args: argparse.Namespace) -> int:
     runner = BenchmarkRunner(config)
     target_dbs = []
 
-    if getattr(args, "all", False) or args.database == "all":
+    db_arg = getattr(args, "database", None)
+    if getattr(args, "all", False) or not db_arg or db_arg.lower() == "all":
         dbs = config.get_database_configs()
         target_dbs = [k for k, v in dbs.items() if v.enabled]
     else:
-        target_dbs = [args.database.lower()]
+        target_dbs = [db_arg.lower()]
 
     logger.info(f"Target benchmark databases: {', '.join(target_dbs)}")
 
@@ -181,7 +205,7 @@ def cmd_benchmark(config: BenchmarkConfig, args: argparse.Namespace) -> int:
         except Exception as e:
             logger.error(f"Benchmark failed for database '{db_key}': {e}")
 
-    # Automatically generate reports if requested
+    # Automatically generate reports after benchmark execution
     reporter = BenchmarkReporter(config)
     reporter.generate_all_charts()
     reporter.generate_markdown_report()
@@ -209,14 +233,13 @@ def cmd_run_all(config: BenchmarkConfig, args: argparse.Namespace) -> int:
         return v_code
 
     # 2. Prepare Data
-    nodes_path = config.processed_data_dir / "nodes.csv"
-    if not nodes_path.exists():
-        p_code = cmd_prepare_data(config, args)
-        if p_code != 0:
-            return p_code
+    p_code = cmd_prepare_data(config, args)
+    if p_code != 0:
+        return p_code
 
-    # 3. Benchmark
+    # 3. Benchmark All Databases
     args.all = True
+    args.database = "all"
     args.skip_load = False
     b_code = cmd_benchmark(config, args)
 
@@ -232,7 +255,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         prog="python -m benchmark.cli",
-        description="Graph Database Cloud Benchmarking Suite (CognDB, Neo4j, Memgraph, FalkorDB, Neptune, Kùzu)"
+        description="Graph Database Cloud Benchmarking Suite (CognDB, Neo4j, Memgraph, FalkorDB, Kùzu)"
     )
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
@@ -241,19 +264,19 @@ def main() -> None:
 
     # check-connections
     p_check = subparsers.add_parser("check-connections", help="Test live network connectivity and authentication for databases in .env")
-    p_check.add_argument("--database", help="Optional specific database key to verify (e.g. cognodb, neo4j)")
+    p_check.add_argument("--database", help="Optional specific database key to verify (e.g. cognodb, neo4j, memgraph, falkordb, kuzu)")
 
     # prepare-data
     p_data = subparsers.add_parser("prepare-data", help="Download and prepare standardized dataset")
     p_data.add_argument("--synthetic-only", action="store_true", help="Force synthetic deterministic generation without download")
 
     # load
-    p_load = subparsers.add_parser("load", help="Load dataset into a single database")
-    p_load.add_argument("--database", required=True, help="Target database key (e.g. cognodb, neo4j, memgraph, falkordb, kuzu)")
+    p_load = subparsers.add_parser("load", help="Load dataset into database(s)")
+    p_load.add_argument("--database", help="Target database key (default: all enabled)")
 
     # benchmark
     p_bench = subparsers.add_parser("benchmark", help="Run benchmark suite")
-    p_bench.add_argument("--database", help="Target database key (e.g. cognodb, neo4j, memgraph, falkordb, kuzu, mock)")
+    p_bench.add_argument("--database", help="Target database key (e.g. cognodb, neo4j, memgraph, falkordb, kuzu, mock, all)")
     p_bench.add_argument("--all", action="store_true", help="Benchmark all enabled databases")
     p_bench.add_argument("--skip-load", action="store_true", help="Skip data loading phase")
 
